@@ -1,143 +1,200 @@
-import cv2
+import sys
+import math
+import numpy as np
 import csv
-import time
-import cvzone
-from cvzone.HandTrackingModule import HandDetector
+import cv2
+from PyQt5 import QtWidgets
+from PyQt5.QtWidgets import QApplication, QWidget, QFileDialog
+from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.uic import loadUi
+from PyQt5.QtCore import Qt, QObject, QTimer, pyqtSlot
+import Mouse
+import Quiz
 
-detector = HandDetector(detectionCon=0.8, maxHands=2)
-video = cv2.VideoCapture(0)
 
-prev_time = 0
-
-class ARD():
-    def __init__(self, data):
-        self.Pertanyaan = data[0]
-        self.Pilihan1 = data[1]
-        self.Pilihan2 = data[2]
-        self.Pilihan3 = data[3]
-        self.Pilihan4 = data[4]
-        self.Jawaban = int(data[5])
-
-        self.JawabanSiswa = None
-
-    def update(self, fingers):
-        if fingers == [0, 1, 0, 0, 0]:  # Jika 1 jari diangkat
-            self.JawabanSiswa = 1
-        elif fingers == [0, 1, 1, 0, 0]:  # Jika 2 jari diangkat
-            self.JawabanSiswa = 2
-        elif fingers == [0, 1, 1, 1, 0]:  # Jika 3 jari diangkat
-            self.JawabanSiswa = 3
-        elif fingers == [0, 1, 1, 1, 1]:  # Jika 4 jari diangkat
-            self.JawabanSiswa = 4
-        elif fingers == [1, 1, 1, 1, 1]:  # Jika 5 jari diangkat
-            self.JawabanSiswa = None
-
-    def drawQuestion(self, img, fontSize=2, maxLineWidth=600, offset=10, border=1, color=(0, 0, 0)):
-        lines = []
-        words = self.Pertanyaan.split()
-        temp_line = ''
-        for word in words:
-            if cv2.getTextSize(temp_line + ' ' + word, cv2.FONT_HERSHEY_SIMPLEX, fontSize, border)[0][
-                0] <= maxLineWidth:
-                temp_line += ' ' + word
-            else:
-                lines.append(temp_line.strip())
-                temp_line = word
-        lines.append(temp_line.strip())
-
-        y = 100
-        for line in lines[:2]:  # Hanya tampilkan dua baris pertama
-            img, _ = cvzone.putTextRect(img, line, [100, y], fontSize, 2, offset=10, border=1,
-                                        colorT=(255, 255, 0), colorB=(255, 255, 0), colorR=(0, 0, 0))
-            y += 50
-        return img
-
-# Import CSV File
-pathCSV = "Pertanyaan.csv"
-with open(pathCSV, newline='\n') as f:
-    reader = csv.reader(f)
-    data = list(reader)[1:]
-
-# Membuat Objek untuk Pertanyaan
-ardlist = []
-for q in data:
-    ardlist.append(ARD(q))
-
-print(len(data))
-
-qNo = 0
-qTotal = len(data)
-
-# Kotak reset
-reset_box = [0, 0, 80, 50]  # [x1, y1, width, height]
-
-def on_mouse_click(event, x, y, flags, param):
-    global qNo, score
-    if event == cv2.EVENT_LBUTTONDOWN:
-        if reset_box[0] < x < reset_box[0] + reset_box[2] and reset_box[1] < y < reset_box[1] + reset_box[3]:
-            qNo = 0
-            score = 0
-
-cv2.namedWindow("img")
-cv2.setMouseCallback("img", on_mouse_click)
-
-running = True
-
-class Quiz:
-
-    while running:
-        ret, frame = video.read()
-        frame = cv2.flip(frame, 1)
-        hands, img = detector.findHands(frame)
-
-        if qNo < qTotal:
-            ard = ardlist[qNo]
-
-            # Gambar pertanyaan dengan dua baris
-            img = ard.drawQuestion(img, 2, 1000, 10, 1, color=(255, 255, 0))
-
-            img, bbox1 = cvzone.putTextRect(img, ard.Pilihan1, [100, 250], 2, 2, offset=10, border=1,
-                                            colorR=(0, 0, 0), colorT=(255, 255, 0), colorB=(255, 255, 0))
-            img, bbox2 = cvzone.putTextRect(img, ard.Pilihan2, [400, 250], 2, 2, offset=10, border=1,
-                                            colorR=(0, 0, 0), colorT=(255, 255, 0), colorB=(255, 255, 0))
-            img, bbox3 = cvzone.putTextRect(img, ard.Pilihan3, [100, 350], 2, 2, offset=10, border=1,
-                                            colorR=(0, 0, 0), colorT=(255, 255, 0), colorB=(255, 255, 0))
-            img, bbox4 = cvzone.putTextRect(img, ard.Pilihan4, [400, 350], 2, 2, offset=10, border=1,
-                                            colorR=(0, 0, 0), colorT=(255, 255, 0), colorB=(255, 255, 0))
-
-            if hands and len(hands) > 0:  # Pastikan ada setidaknya satu tangan terdeteksi
-                lmList = hands[0]['lmList']
-                fingers = detector.fingersUp(hands[0])  # Ubah menjadi hands[0]
-                ard.update(fingers)
-                if ard.JawabanSiswa is not None:
-                    time.sleep(3)
-                    qNo += 1
-
-        else:
-            score = sum(1 for ard in ardlist if ard.Jawaban == ard.JawabanSiswa)  # Menghitung skor
-            score = round((score / qTotal) * 100, 2)
-            img, _ = cvzone.putTextRect(img, "Quiz Selesai!", [70, 200], 5, 3, offset=10, border=5,
-                                        colorR=(0, 0, 0), colorT=(255, 255, 0), colorB=(255, 255, 0))
-            img, _ = cvzone.putTextRect(img, f'Nilai: {score}%', [70, 300], 5, 3, offset=10, border=5,
-                                        colorR=(0, 0, 0), colorT=(255, 255, 0), colorB=(255, 255, 0))
-
-        if qNo == qTotal:
-            # Tampilkan kotak reset
-            cv2.rectangle(img, (reset_box[0], reset_box[1]), (reset_box[0] + reset_box[2], reset_box[1] + reset_box[3]),
-                        (0, 0, 0), cv2.FILLED)
-            img, _ = cvzone.putTextRect(img, "Reset", [reset_box[0] + 15, reset_box[1] + 30], 1, 2, offset=5,
-                                        colorR=(0, 0, 255), colorT=(0, 255, 255), colorB=(0, 0, 255))
-
-        barValue = 100 + (400 // qTotal) * qNo
-        cv2.rectangle(img, (100, 400), (barValue, 450), (255, 255, 0), cv2.FILLED)
-        cv2.rectangle(img, (100, 400), (500, 450), (0, 0, 0), 5)
-        img, _ = cvzone.putTextRect(img, f'{round((qNo / qTotal) * 100)}%', [530, 430], 1, 1, offset=10,
-                                    colorR=(0, 0, 0), colorT=(255, 255, 0), colorB=(255, 255, 0))
-
-        cv2.imshow("img", img)
-
-        if cv2.waitKey(1) == ord('q'):
-            running = False
-            break
+def fit_pixmap(pixmap, label_height, label_width):
+    width = pixmap.width()
+    height = pixmap.height()
+    pixmap_aspect_ratio = height / width
+    label_aspect_ratio = label_height / label_width
+    
+    if pixmap_aspect_ratio > label_aspect_ratio:
+        k = label_height / height
+        w_cal = math.floor(k * width)
+        img_resize = pixmap.scaled(w_cal, label_height)
         
-    cv2.destroyAllWindows()
+    elif pixmap_aspect_ratio <= label_aspect_ratio:
+        k = label_width / width
+        h_cal = math.floor(k * height)
+        img_resize = pixmap.scaled(label_width, h_cal)
+        
+    return img_resize
+
+
+class MainWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+        loadUi("ui/main_window.ui", self)
+        self.pushButton.clicked.connect(self.to_presentation)
+        self.pushButton_2.clicked.connect(self.to_quiz_menu)
+        
+    def to_quiz_menu(self):
+        quiz_menu = QuizMenu()
+        widget.addWidget(quiz_menu)
+        widget.setCurrentIndex(widget.currentIndex() + 1)
+        
+    def to_presentation(self):
+        self.virtual_mouse = Mouse.Mouse()
+        self.virtual_mouse.run()
+    
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            self.close()
+        
+        
+class QuizMenu(QWidget):
+    def __init__(self):
+        super().__init__()
+        loadUi("ui/quiz.ui", self)
+        self.pushButton.clicked.connect(self.to_main_screen)
+        self.pushButton_2.clicked.connect(self.to_quiz_edit)
+        self.pushButton_3.clicked.connect(self.to_quiz_start)
+        
+    def to_main_screen(self):
+        window = MainWindow()
+        widget.addWidget(window)
+        widget.setCurrentIndex(widget.currentIndex() + 1)
+        
+    def to_quiz_edit(self):
+        quiz_edit = QuizEdit()
+        widget.addWidget(quiz_edit)
+        widget.setCurrentIndex(widget.currentIndex() + 1)
+        
+    def to_quiz_start(self):
+        quiz_start = QuizStart()
+        widget.addWidget(quiz_start)
+        widget.setCurrentIndex(widget.currentIndex() + 1)
+        
+
+class QuizStart(QWidget):
+    def __init__(self):
+        self.question = 0
+        super().__init__()
+        loadUi("ui/quiz_start.ui", self)
+        
+        self.pixmap_a = QPixmap()
+        self.pixmap_b = QPixmap()
+        self.pixmap_c = QPixmap()
+        self.pixmap_d = QPixmap()
+        
+        QTimer.singleShot(3000, self.undo_question)
+        self.pushButton.clicked.connect(self.undo_question)
+        self.pushButton_2.clicked.connect(self.next_question)
+        self.pushButton_3.clicked.connect(self.to_quiz_menu)
+        
+        self.thread = Quiz.Quiz()
+        self.thread.frame_signal.connect(self.computer_vision)
+        self.thread.question_signal.connect(self.handle_question)
+        self.thread.reset_signal.connect(self.handle_question)
+        self.thread.start()
+    
+    @pyqtSlot(np.ndarray)
+    def computer_vision(self, frame):
+        cv_label_width = self.label.width()
+        cv_label_height = math.ceil(cv_label_width * 9 / 16)
+        resized_frame = cv2.resize(frame, (cv_label_width, cv_label_height))
+        rgb_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb_frame.shape
+        bytes_per_line = ch * w
+        q_img = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        self.label.setPixmap(QPixmap.fromImage(q_img))
+        
+    def handle_question(self, qNo):
+        self.question_cv = qNo
+        self.pixmap_a = QPixmap(f'quiz/question{self.question_cv}/a.png')
+        self.pixmap_b = QPixmap(f'quiz/question{self.question_cv}/b.png')
+        self.pixmap_c = QPixmap(f'quiz/question{self.question_cv}/c.png')
+        self.pixmap_d = QPixmap(f'quiz/question{self.question_cv}/d.png')
+        QTimer.singleShot(0, self.set_image)
+        
+    def undo_question(self):
+        self.thread.command_signal.emit("undo")
+        if self.question >= 1:
+            self.question -= 1
+        
+    def next_question(self):
+        self.thread.command_signal.emit("reset")
+        self.question = 0
+        
+    def set_image(self):
+        label_height = self.label_2.height()
+        label_width = self.label_2.width()
+        pixmap_a = fit_pixmap(self.pixmap_a, label_height, label_width)
+        pixmap_b = fit_pixmap(self.pixmap_b, label_height, label_width)
+        pixmap_c = fit_pixmap(self.pixmap_c, label_height, label_width)
+        pixmap_d = fit_pixmap(self.pixmap_d, label_height, label_width)
+        self.set_pixmap(pixmap_a, self.label_2)
+        self.set_pixmap(pixmap_b, self.label_3)
+        self.set_pixmap(pixmap_c, self.label_4)
+        self.set_pixmap(pixmap_d, self.label_5)
+        
+    def to_quiz_menu(self):
+        quiz_menu = QuizMenu()
+        widget.addWidget(quiz_menu)
+        widget.setCurrentIndex(widget.currentIndex() + 1)
+        
+    def resizeEvent(self, event):
+        QTimer.singleShot(1000, self.set_image)
+        super().resizeEvent(event)
+        
+    def set_pixmap(self, pixmap, label):
+        label.setPixmap(pixmap)
+        label.setAlignment(Qt.AlignCenter)
+        # for i in range(1, 6):
+        #     var_name = f"label_{i}"
+        #     if hasattr(self, var_name):
+        #         getattr(self, var_name).setPixmap(pixmap)
+        #         getattr(self, var_name).setAlignment(Qt.AlignCenter)
+        
+
+class QuizEdit(QWidget):
+    def __init__(self):
+        super().__init__()
+        loadUi("ui/quiz_edit.ui", self)
+        self.pushButton_3.clicked.connect(self.to_quiz_menu)
+        self.pushButton_4.clicked.connect(self.to_path_widget)
+        
+        self.quiz_pack = []
+        
+    def to_quiz_menu(self):
+        quiz_menu = QuizMenu()
+        widget.addWidget(quiz_menu)
+        widget.setCurrentIndex(widget.currentIndex() + 1)
+        
+    def to_path_widget(self):
+        filepath = QFileDialog.getOpenFileName(self, "Open File", "", "CSV Files (*.csv);;All Files (*)")
+        if filepath:
+            self.textEdit_6.setText(filepath[0])
+            
+            
+class EscapeFilter(QObject):
+    def eventFilter(self, obj, event):
+        if event.type() == event.KeyPress and event.key() == Qt.Key_Escape:
+            QApplication.quit()
+            return True
+        return super().eventFilter(obj, event)
+    
+        
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    widget = QtWidgets.QStackedWidget()
+    widget.addWidget(window)
+    widget.setGeometry(600, 200, 640, 480)
+    # widget.showFullScreen()
+    widget.show()
+    
+    escape_filter = EscapeFilter()
+    app.installEventFilter(escape_filter)
+    
+    sys.exit(app.exec_())
