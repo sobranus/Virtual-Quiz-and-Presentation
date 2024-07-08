@@ -9,7 +9,7 @@ from PyQt5 import QtWidgets
 from PyQt5.QtWidgets import QApplication, QWidget, QFileDialog
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.uic import loadUi
-from PyQt5.QtCore import Qt, QObject, QTimer, pyqtSlot
+from PyQt5.QtCore import Qt, QObject, QTimer, pyqtSignal, pyqtSlot
 import Mouse
 import Quiz
 
@@ -160,6 +160,9 @@ class QuizStart(QWidget):
         
 
 class QuizEdit(QWidget):
+    
+    closed = pyqtSignal()
+    
     def __init__(self):
         super().__init__()
         loadUi("ui/quiz_edit.ui", self)
@@ -168,6 +171,9 @@ class QuizEdit(QWidget):
         
         self.pushButton.clicked.connect(self.save_inputs)
         self.pushButton_3.clicked.connect(self.to_quiz_menu)
+        self.pushButton_4.clicked.connect(self.new_quiz_window)
+        self.pushButton_5.clicked.connect(self.load_question)
+        self.pushButton_6.clicked.connect(self.load_question)
         self.upload_0.clicked.connect(self.image_upload)
         self.upload_1.clicked.connect(self.image_upload)
         self.upload_2.clicked.connect(self.image_upload)
@@ -180,6 +186,30 @@ class QuizEdit(QWidget):
         quiz_menu = QuizMenu()
         widget.addWidget(quiz_menu)
         widget.setCurrentIndex(widget.currentIndex() + 1)
+        
+    def new_quiz_window(self):
+        self.new_quiz = NewQuiz()
+        self.new_quiz.closed.connect(self.load_quiz_list)
+        self.new_quiz.show()
+        self.new_quiz.raise_()
+        self.new_quiz.activateWindow()
+        
+    def load_question(self):
+        button = self.sender().objectName()
+        current_number = int(self.label_11.text())
+            
+        if button[-1] == '5':
+            if current_number > 1:
+                number = str(current_number - 1)
+                self.label_11.setText(number)
+        elif button[-1] == '6':
+            with open(f'quiz/{self.comboBox.currentText()}.csv', 'r', newline='', encoding='utf-8') as file:
+                reader = csv.reader(file)
+                rows = list(reader)
+                if current_number < len(rows):
+                    number = str(current_number + 1)
+                    self.label_11.setText(number)
+        
     
     def disable_choice_type(self):
         if self.radioButton.isChecked() and not self.radioButton_2.isChecked():
@@ -199,9 +229,13 @@ class QuizEdit(QWidget):
         self.upload_4.setEnabled(image_type)
         
     def load_quiz_list(self):
+        existing_files = [self.comboBox.itemText(i) for i in range(self.comboBox.count())]
         all_files = os.listdir('quiz')
         csv_files = [os.path.splitext(file)[0] for file in all_files if file.endswith('.csv')]
-        self.comboBox.addItems(csv_files)
+        
+        for file in csv_files:
+            if file not in existing_files:
+                self.comboBox.addItem(file)
         
     def save_inputs(self):
         quiz_name = self.comboBox.currentText()
@@ -293,6 +327,46 @@ class QuizEdit(QWidget):
             display_label.setAlignment(Qt.AlignCenter)
             
             
+class NewQuiz(QWidget):
+    closed = pyqtSignal()
+    
+    def __init__(self):
+        super().__init__()
+        loadUi("ui/new_quiz.ui", self)
+        self.setWindowFlags(Qt.Window | Qt.CustomizeWindowHint | Qt.WindowTitleHint)
+        self.setWindowModality(Qt.ApplicationModal)
+        self.quiz_edit = QuizEdit()
+        self.all_files = os.listdir('quiz')
+        
+        self.pushButton.clicked.connect(self.save_quiz)
+        self.pushButton_2.clicked.connect(self.cancel_button)
+        
+    def save_quiz(self):
+        quiz_name = self.lineEdit.text()
+        csv_files = [os.path.splitext(file)[0] for file in self.all_files if file.endswith('.csv')]
+        
+        if quiz_name:
+            if quiz_name in csv_files:
+                self.label_2.setText('There is already a Quiz with that name.')
+            else:
+                with open(f'quiz/{quiz_name}.csv', 'w', newline='', encoding='utf-8') as file:
+                    writer = csv.writer(file)
+                    writer.writerow(['number', 'question_text', 'question_image', 'choice_type', 'true_choice', 'choice1', 'choice2', 
+                                    'choice3', 'choice4'])
+                self.close()
+                self.closed.emit()
+        else:
+            self.label_2.setText('Invalid Quiz name.')
+        
+    def cancel_button(self):
+        csv_files = [file for file in self.all_files if file.endswith('.csv')]
+        
+        if not csv_files:
+            self.label_2.setText('There is no Quiz to edit, Create one to edit.')
+        elif csv_files:
+            self.close()
+
+
 class EscapeFilter(QObject):
     def eventFilter(self, obj, event):
         if event.type() == event.KeyPress and event.key() == Qt.Key_Escape:
