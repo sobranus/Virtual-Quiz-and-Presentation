@@ -1,4 +1,6 @@
 import sys
+import os
+import shutil
 import math
 import numpy as np
 import csv
@@ -161,20 +163,134 @@ class QuizEdit(QWidget):
     def __init__(self):
         super().__init__()
         loadUi("ui/quiz_edit.ui", self)
-        self.pushButton_3.clicked.connect(self.to_quiz_menu)
-        self.pushButton_4.clicked.connect(self.to_path_widget)
+        QTimer.singleShot(0, self.disable_choice_type)
+        QTimer.singleShot(0, self.load_quiz_list)
         
-        self.quiz_pack = []
+        self.pushButton.clicked.connect(self.save_inputs)
+        self.pushButton_3.clicked.connect(self.to_quiz_menu)
+        self.upload_0.clicked.connect(self.image_upload)
+        self.upload_1.clicked.connect(self.image_upload)
+        self.upload_2.clicked.connect(self.image_upload)
+        self.upload_3.clicked.connect(self.image_upload)
+        self.upload_4.clicked.connect(self.image_upload)
+        self.radioButton.toggled.connect(self.disable_choice_type)
+        self.radioButton_2.toggled.connect(self.disable_choice_type)
         
     def to_quiz_menu(self):
         quiz_menu = QuizMenu()
         widget.addWidget(quiz_menu)
         widget.setCurrentIndex(widget.currentIndex() + 1)
+    
+    def disable_choice_type(self):
+        if self.radioButton.isChecked() and not self.radioButton_2.isChecked():
+            text_type = True
+            image_type = False
+        elif self.radioButton_2.isChecked() and not self.radioButton.isChecked():
+            text_type = False
+            image_type = True
         
-    def to_path_widget(self):
-        filepath = QFileDialog.getOpenFileName(self, "Open File", "", "CSV Files (*.csv);;All Files (*)")
+        self.choice_1.setEnabled(text_type)
+        self.choice_2.setEnabled(text_type)
+        self.choice_3.setEnabled(text_type)
+        self.choice_4.setEnabled(text_type)
+        self.upload_1.setEnabled(image_type)
+        self.upload_2.setEnabled(image_type)
+        self.upload_3.setEnabled(image_type)
+        self.upload_4.setEnabled(image_type)
+        
+    def load_quiz_list(self):
+        all_files = os.listdir('quiz')
+        csv_files = [os.path.splitext(file)[0] for file in all_files if file.endswith('.csv')]
+        self.comboBox.addItems(csv_files)
+        
+    def save_inputs(self):
+        quiz_name = self.comboBox.currentText()
+        question_number = int(self.label_11.text())
+        question_text = self.questionText.toPlainText()
+        question_image = self.label_6.text()
+        true_choice = int(self.comboBox_2.currentText())
+        choices = []
+        
+        if self.radioButton.isChecked() and not self.radioButton_2.isChecked():
+                choice_type = 'text'
+        elif self.radioButton_2.isChecked() and not self.radioButton.isChecked():
+                choice_type = 'image'
+                
+        if choice_type == 'text':
+                choices.extend([
+                self.choice_1.toPlainText(),
+                self.choice_2.toPlainText(),
+                self.choice_3.toPlainText(),
+                self.choice_4.toPlainText()
+            ])
+        elif choice_type == 'image':
+                choices.extend([
+                self.label_7.text(),
+                self.label_8.text(),
+                self.label_9.text(),
+                self.label_10.text()
+            ])
+        
+        with open(f'quiz/{quiz_name}.csv', 'r', newline='', encoding='utf-8') as file:
+            reader = csv.reader(file)
+            rows = list(reader)
+            
+            row = [
+                question_number,
+                question_text,
+                question_image,
+                choice_type,
+                true_choice
+            ]
+            for choice in choices:
+                row.append(choice)
+            if question_number < len(rows):
+                rows[question_number] = row
+            else:
+                rows.append(row)
+            
+            with open(f'quiz/{quiz_name}.csv', mode='w', newline='', encoding='utf-8') as file:
+                writer = csv.writer(file)
+                writer.writerows(rows)
+        
+    def image_upload(self):
+        button = self.sender().objectName()
+        image_formats = "All Supported Files (*.png *.jpg *.jpeg);;PNG Files (*.png);;JPG Files (*.jpg);;JPEG Files (*.jpeg)"
+        
+        filepath, _ = QFileDialog.getOpenFileName(self, "Open File", "", image_formats)
         if filepath:
-            self.textEdit_6.setText(filepath[0])
+            target_directory = 'quiz/images'
+            if not os.path.exists(target_directory):
+                os.makedirs(target_directory)
+            
+            try:
+                copied_path = shutil.copy(filepath, target_directory)
+            except Exception as e:
+                print(f'Error copying file: {e}')
+                
+            label_height = self.label.height()
+            label_width = self.label.width()
+            pixmap = QPixmap(copied_path)
+            pixmap = fit_pixmap(pixmap, label_height, label_width)
+            
+            if button[-1] == '0':
+                self.label_6.setText(copied_path)
+                display_label = self.label   
+            elif button[-1] == '1':
+                self.label_7.setText(copied_path)
+                display_label = self.label_2
+            elif button[-1] == '2':
+                self.label_8.setText(copied_path)
+                display_label = self.label_3
+            elif button[-1] == '3':
+                self.label_9.setText(copied_path)
+                display_label = self.label_4
+            elif button[-1] == '4':
+                self.label_10.setText(copied_path)
+                display_label = self.label_5
+            
+            display_label.setPixmap(pixmap)
+            display_label.setAlignment(Qt.AlignCenter)
             
             
 class EscapeFilter(QObject):
