@@ -38,11 +38,12 @@ class Data():
 # cv2.setMouseCallback("img", on_mouse_click)
 
 class Quiz(QThread):
-    quiz_name = pyqtSignal(str)
+    quiz_name_signal = pyqtSignal(str)
     frame_signal = pyqtSignal(np.ndarray)
     question_signal = pyqtSignal(int)
     reset_signal = pyqtSignal(int)
     command_signal = pyqtSignal(str)
+    finish_signal = pyqtSignal(str, float)
     stop_signal = pyqtSignal()
     
     def __init__(self):
@@ -52,6 +53,7 @@ class Quiz(QThread):
         self.video.set(cv2.CAP_PROP_FRAME_WIDTH, 1200)
         self.window_name = 'window_name'
         
+        self.quiz_name = ''
         self.ardlist = []
         self.running = True
         self.qNo = 0
@@ -61,12 +63,13 @@ class Quiz(QThread):
         self.last_execution_time = time.time()
         self.cooldown_period = 3
         
-        self.quiz_name.connect(self.import_quiz_data)
+        self.quiz_name_signal.connect(self.import_quiz_data)
         self.command_signal.connect(self.handle_command)
         self.stop_signal.connect(self.stop_quiz)
         
     def import_quiz_data(self, quiz_name):
-        with open(f'quiz/{quiz_name}.csv', newline='') as file:
+        self.quiz_name = quiz_name
+        with open(f'quiz/{self.quiz_name}.csv', newline='') as file:
             reader = csv.DictReader(file)
             data = list(reader)
         for q in data:
@@ -96,23 +99,12 @@ class Quiz(QThread):
                                 
                             self.last_execution_time = time.time()
 
-            else:
+            elif self.qNo == self.qTotal:
                 self.score = sum(1 for ard in self.ardlist if ard.answer == ard.chosen_answer)
                 self.score = round((self.score / self.qTotal) * 100, 2)
-                img, _ = cvzone.putTextRect(img, "Quiz Selesai!", [70, 200], 5, 3, offset=10, border=5,
-                                            colorR=(0, 0, 0), colorT=(255, 255, 0), colorB=(255, 255, 0))
-                img, _ = cvzone.putTextRect(img, f'Nilai: {self.score}%', [70, 300], 5, 3, offset=10, border=5,
-                                            colorR=(0, 0, 0), colorT=(255, 255, 0), colorB=(255, 255, 0))
-
-            if self.qNo == self.qTotal:
-                print('quiz finished')
-
-            barValue = 100 + (400 // self.qTotal) * self.qNo
-            cv2.rectangle(img, (100, 400), (barValue, 450), (255, 255, 0), cv2.FILLED)
-            cv2.rectangle(img, (100, 400), (500, 450), (0, 0, 0), 5)
-            img, _ = cvzone.putTextRect(img, f'{round((self.qNo / self.qTotal) * 100)}%', [530, 430], 1, 1, offset=10,
-                                        colorR=(0, 0, 0), colorT=(255, 255, 0), colorB=(255, 255, 0))
-            
+                self.finish_signal.emit(self.quiz_name, self.score)
+                self.stop_quiz()
+                
             self.frame_signal.emit(img)
             
         cv2.destroyAllWindows()
