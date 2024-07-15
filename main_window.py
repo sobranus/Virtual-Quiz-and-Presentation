@@ -2,6 +2,7 @@ import sys
 import os
 import shutil
 import math
+import time
 import numpy as np
 import csv
 import cv2
@@ -57,12 +58,14 @@ class MainWindow(QWidget):
 class QuizMenu(QWidget):
     def __init__(self):
         super().__init__()
-        loadUi("ui/quiz.ui", self)
-        self.pushButton.clicked.connect(self.to_main_screen)
-        self.pushButton_2.clicked.connect(self.to_quiz_edit)
-        self.pushButton_3.clicked.connect(self.to_quiz_start)
+        loadUi("ui/quiz_menu.ui", self)
+        self.load_quiz_list()
         
-    def to_main_screen(self):
+        self.pushButton.clicked.connect(self.to_main_window)
+        self.pushButton_2.clicked.connect(self.to_quiz_edit)
+        self.pushButton_3.clicked.connect(self.to_quiz_window)
+        
+    def to_main_window(self):
         window = MainWindow()
         widget.addWidget(window)
         widget.setCurrentIndex(widget.currentIndex() + 1)
@@ -71,34 +74,58 @@ class QuizMenu(QWidget):
         quiz_edit = QuizEdit()
         widget.addWidget(quiz_edit)
         widget.setCurrentIndex(widget.currentIndex() + 1)
+        quiz_edit.quiz_index_from_menu.emit(self.comboBox.currentIndex())
         
-    def to_quiz_start(self):
-        quiz_start = QuizStart()
-        widget.addWidget(quiz_start)
+    def to_quiz_window(self):
+        quiz_window = QuizWindow()
+        widget.addWidget(quiz_window)
         widget.setCurrentIndex(widget.currentIndex() + 1)
+        quiz_window.quiz_name_from_menu.emit(self.comboBox.currentText())
+        
+    def load_quiz_list(self):
+        existing_files = [self.comboBox.itemText(i) for i in range(self.comboBox.count())]
+        if not os.path.exists('quiz'):
+                os.makedirs('quiz')
+        all_files = os.listdir('quiz')
+        csv_files = [os.path.splitext(file)[0] for file in all_files if file.endswith('.csv')]
+        
+        for file in csv_files:
+            if file not in existing_files:
+                self.comboBox.addItem(file)
         
 
-class QuizStart(QWidget):
+class QuizWindow(QWidget):
+    quiz_name_from_menu = pyqtSignal(str)
+    
     def __init__(self):
-        self.question = 0
         super().__init__()
-        loadUi("ui/quiz_start.ui", self)
+        loadUi("ui/quiz.ui", self)
         
-        self.pixmap_a = QPixmap()
-        self.pixmap_b = QPixmap()
-        self.pixmap_c = QPixmap()
-        self.pixmap_d = QPixmap()
-        
-        QTimer.singleShot(3000, self.undo_question)
-        self.pushButton.clicked.connect(self.undo_question)
-        self.pushButton_2.clicked.connect(self.next_question)
-        self.pushButton_3.clicked.connect(self.to_quiz_menu)
+        self.quiz_name = ''
+        self.question = 0
+        self.execution_time = time.time()
         
         self.thread = Quiz.Quiz()
+        self.quiz_name_from_menu.connect(self.quiz_data)
+        self.quiz_name_from_menu.connect(self.thread.quiz_name.emit)
         self.thread.frame_signal.connect(self.computer_vision)
         self.thread.question_signal.connect(self.handle_question)
         self.thread.reset_signal.connect(self.handle_question)
         self.thread.start()
+        
+        self.pushButton.clicked.connect(self.undo_question)
+        self.pushButton_2.clicked.connect(self.reset_question)
+        self.pushButton_3.clicked.connect(self.to_quiz_menu)
+        
+    def to_quiz_menu(self):
+        quiz_menu = QuizMenu()
+        widget.addWidget(quiz_menu)
+        widget.setCurrentIndex(widget.currentIndex() + 1)
+        self.thread.stop_signal.emit()
+        
+    def quiz_data(self, quiz_name):
+        self.quiz_name = quiz_name
+        self.undo_question()
     
     @pyqtSlot(np.ndarray)
     def computer_vision(self, frame):
@@ -111,69 +138,73 @@ class QuizStart(QWidget):
         q_img = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
         self.label.setPixmap(QPixmap.fromImage(q_img))
         
-    def handle_question(self, qNo):
-        self.question_cv = qNo
-        self.pixmap_a = QPixmap(f'quiz/question{self.question_cv}/a.png')
-        self.pixmap_b = QPixmap(f'quiz/question{self.question_cv}/b.png')
-        self.pixmap_c = QPixmap(f'quiz/question{self.question_cv}/c.png')
-        self.pixmap_d = QPixmap(f'quiz/question{self.question_cv}/d.png')
-        QTimer.singleShot(0, self.set_image)
+    def handle_question(self, question_index):
+        self.question = question_index
+        with open(f'quiz/{self.quiz_name}.csv', 'r', newline='', encoding='utf-8') as file:
+            reader = csv.reader(file)
+            rows = list(reader)
+            question_data = rows[self.question + 1]
+            
+            self.label_10.setText(question_data[1])
+            if question_data[2]:
+                self.set_image(self.label_1, question_data[2])
+            else:
+                self.label_1.clear()
+                
+            if question_data[3] == 'text':
+                self.label_2.setText(question_data[5])
+                self.label_3.setText(question_data[6])
+                self.label_4.setText(question_data[7])
+                self.label_5.setText(question_data[8])
+            elif question_data[3] == 'image':
+                self.set_image(self.label_2, question_data[5])
+                self.set_image(self.label_3, question_data[6])
+                self.set_image(self.label_4, question_data[7])
+                self.set_image(self.label_5, question_data[8])
         
     def undo_question(self):
-        self.thread.command_signal.emit("undo")
         if self.question >= 1:
             self.question -= 1
+        self.thread.command_signal.emit("undo")
         
-    def next_question(self):
-        self.thread.command_signal.emit("reset")
+    def reset_question(self):
         self.question = 0
+        self.thread.command_signal.emit("reset")
         
-    def set_image(self):
-        label_height = self.label_2.height()
-        label_width = self.label_2.width()
-        pixmap_a = fit_pixmap(self.pixmap_a, label_height, label_width)
-        pixmap_b = fit_pixmap(self.pixmap_b, label_height, label_width)
-        pixmap_c = fit_pixmap(self.pixmap_c, label_height, label_width)
-        pixmap_d = fit_pixmap(self.pixmap_d, label_height, label_width)
-        self.set_pixmap(pixmap_a, self.label_2)
-        self.set_pixmap(pixmap_b, self.label_3)
-        self.set_pixmap(pixmap_c, self.label_4)
-        self.set_pixmap(pixmap_d, self.label_5)
-        
-    def to_quiz_menu(self):
-        quiz_menu = QuizMenu()
-        widget.addWidget(quiz_menu)
-        widget.setCurrentIndex(widget.currentIndex() + 1)
-        
-    def resizeEvent(self, event):
-        QTimer.singleShot(1000, self.set_image)
-        super().resizeEvent(event)
-        
-    def set_pixmap(self, pixmap, label):
-        label.setPixmap(pixmap)
-        label.setAlignment(Qt.AlignCenter)
-        # for i in range(1, 6):
-        #     var_name = f"label_{i}"
-        #     if hasattr(self, var_name):
-        #         getattr(self, var_name).setPixmap(pixmap)
-        #         getattr(self, var_name).setAlignment(Qt.AlignCenter)
+    def set_image(self, label, image_path):
+        if image_path.lower().endswith(('.png', '.jpg', 'jpeg')):
+            label_height = label.height()
+            label_width = label.width()
+            pixmap = QPixmap(image_path)
+            pixmap_resized = fit_pixmap(pixmap, label_height, label_width)
+            label.setPixmap(pixmap_resized)
+            label.setAlignment(Qt.AlignCenter)
+        else:
+            label.clear()
         
 
 class QuizEdit(QWidget):
-    
+    quiz_index_from_menu = pyqtSignal(int)
     closed = pyqtSignal()
     
     def __init__(self):
         super().__init__()
         loadUi("ui/quiz_edit.ui", self)
-        QTimer.singleShot(0, self.disable_choice_type)
-        QTimer.singleShot(0, self.load_quiz_list)
         
-        self.pushButton.clicked.connect(self.save_inputs)
+        self.disable_choice_type()
+        self.load_quiz_list()
+        if not self.comboBox.currentText():
+            self.new_quiz_window()
+        else:
+            self.load_question()
+        self.quiz_index_from_menu.connect(self.comboBox.setCurrentIndex)
+        
         self.pushButton_3.clicked.connect(self.to_quiz_menu)
+        self.comboBox.currentIndexChanged.connect(self.select_quiz_handle)
+        self.pushButton.clicked.connect(self.save_inputs)
         self.pushButton_4.clicked.connect(self.new_quiz_window)
-        self.pushButton_5.clicked.connect(self.load_question)
-        self.pushButton_6.clicked.connect(self.load_question)
+        self.pushButton_5.clicked.connect(self.question_number_handle)
+        self.pushButton_6.clicked.connect(self.question_number_handle)
         self.upload_0.clicked.connect(self.image_upload)
         self.upload_1.clicked.connect(self.image_upload)
         self.upload_2.clicked.connect(self.image_upload)
@@ -194,7 +225,11 @@ class QuizEdit(QWidget):
         self.new_quiz.raise_()
         self.new_quiz.activateWindow()
         
-    def load_question(self):
+    def select_quiz_handle(self):
+        self.label_11.setText('1')
+        self.load_question()
+        
+    def question_number_handle(self):
         button = self.sender().objectName()
         current_number = int(self.label_11.text())
             
@@ -210,6 +245,7 @@ class QuizEdit(QWidget):
                     number = str(current_number + 1)
                     self.label_11.setText(number)
         
+        self.load_question()
     
     def disable_choice_type(self):
         if self.radioButton.isChecked() and not self.radioButton_2.isChecked():
@@ -236,13 +272,67 @@ class QuizEdit(QWidget):
         for file in csv_files:
             if file not in existing_files:
                 self.comboBox.addItem(file)
+                
+    def load_image(self, image_path, label):
+        if image_path.lower().endswith(('.png', '.jpg', 'jpeg')):
+            label_height = label.height()
+            label_width = label.width()
+            pixmap = QPixmap(image_path)
+            pixmap = fit_pixmap(pixmap, label_height, label_width)
+            label.setPixmap(pixmap)
+            label.setAlignment(Qt.AlignCenter)
+        else:
+            label.clear()
+    
+    def load_question(self):
+        quiz_name = self.comboBox.currentText()
+        question_number = int(self.label_11.text())
+        question_data = [f'{question_number}', '', '', 'text', '1', '', '', '', '']
+            
+        with open(f'quiz/{quiz_name}.csv', 'r', newline='', encoding='utf-8') as file:
+            reader = csv.reader(file)
+            for i, row in enumerate(reader):
+                if i == question_number:
+                    question_data = row
+                    
+            self.questionText.setPlainText(question_data[1])
+            self.comboBox_2.setCurrentIndex(int(question_data[4]) - 1)
+            self.label_6.setText(question_data[2])
+            self.load_image(question_data[2], self.label)
+            
+            self.choice_1.clear()
+            self.choice_2.clear()
+            self.choice_3.clear()
+            self.choice_4.clear()
+            self.label_7.clear()
+            self.label_8.clear()
+            self.label_9.clear()
+            self.label_10.clear()
+            
+            if question_data[3] == 'text':
+                self.radioButton.setChecked(True)
+                self.choice_1.setPlainText(question_data[5])
+                self.choice_2.setPlainText(question_data[6])
+                self.choice_3.setPlainText(question_data[7])
+                self.choice_4.setPlainText(question_data[8])
+            elif question_data[3] == 'image':
+                self.radioButton_2.setChecked(True)
+                self.label_7.setText(question_data[5])
+                self.label_8.setText(question_data[6])
+                self.label_9.setText(question_data[7])
+                self.label_10.setText(question_data[8])
+            
+            self.load_image(question_data[5], self.label_2)
+            self.load_image(question_data[6], self.label_3)
+            self.load_image(question_data[7], self.label_4)
+            self.load_image(question_data[8], self.label_5)
         
     def save_inputs(self):
         quiz_name = self.comboBox.currentText()
         question_number = int(self.label_11.text())
         question_text = self.questionText.toPlainText()
         question_image = self.label_6.text()
-        true_choice = int(self.comboBox_2.currentText())
+        answer = int(self.comboBox_2.currentText())
         choices = []
         
         if self.radioButton.isChecked() and not self.radioButton_2.isChecked():
@@ -274,7 +364,7 @@ class QuizEdit(QWidget):
                 question_text,
                 question_image,
                 choice_type,
-                true_choice
+                answer
             ]
             for choice in choices:
                 row.append(choice)
@@ -299,32 +389,25 @@ class QuizEdit(QWidget):
             
             try:
                 copied_path = shutil.copy(filepath, target_directory)
+                normalized_path = copied_path.replace(os.sep, '/')
             except Exception as e:
                 print(f'Error copying file: {e}')
-                
-            label_height = self.label.height()
-            label_width = self.label.width()
-            pixmap = QPixmap(copied_path)
-            pixmap = fit_pixmap(pixmap, label_height, label_width)
             
             if button[-1] == '0':
-                self.label_6.setText(copied_path)
-                display_label = self.label   
+                self.label_6.setText(normalized_path)
+                self.load_image(normalized_path, self.label)
             elif button[-1] == '1':
-                self.label_7.setText(copied_path)
-                display_label = self.label_2
+                self.label_7.setText(normalized_path)
+                self.load_image(normalized_path, self.label_2)
             elif button[-1] == '2':
-                self.label_8.setText(copied_path)
-                display_label = self.label_3
+                self.label_8.setText(normalized_path)
+                self.load_image(normalized_path, self.label_3)
             elif button[-1] == '3':
-                self.label_9.setText(copied_path)
-                display_label = self.label_4
+                self.label_9.setText(normalized_path)
+                self.load_image(normalized_path, self.label_4)
             elif button[-1] == '4':
-                self.label_10.setText(copied_path)
-                display_label = self.label_5
-            
-            display_label.setPixmap(pixmap)
-            display_label.setAlignment(Qt.AlignCenter)
+                self.label_10.setText(normalized_path)
+                self.load_image(normalized_path, self.label_5)
             
             
 class NewQuiz(QWidget):
@@ -335,11 +418,25 @@ class NewQuiz(QWidget):
         loadUi("ui/new_quiz.ui", self)
         self.setWindowFlags(Qt.Window | Qt.CustomizeWindowHint | Qt.WindowTitleHint)
         self.setWindowModality(Qt.ApplicationModal)
-        self.quiz_edit = QuizEdit()
         self.all_files = os.listdir('quiz')
         
         self.pushButton.clicked.connect(self.save_quiz)
         self.pushButton_2.clicked.connect(self.cancel_button)
+        self.pushButton_3.clicked.connect(self.to_quiz_menu)
+        
+    def to_quiz_menu(self):
+        quiz_menu = QuizMenu()
+        widget.addWidget(quiz_menu)
+        widget.setCurrentIndex(widget.currentIndex() + 1)
+        self.close()
+        
+    def cancel_button(self):
+        csv_files = [file for file in self.all_files if file.endswith('.csv')]
+        
+        if not csv_files:
+            self.label_2.setText('There is no Quiz to edit, Create one to edit.')
+        elif csv_files:
+            self.close()
         
     def save_quiz(self):
         quiz_name = self.lineEdit.text()
@@ -351,20 +448,12 @@ class NewQuiz(QWidget):
             else:
                 with open(f'quiz/{quiz_name}.csv', 'w', newline='', encoding='utf-8') as file:
                     writer = csv.writer(file)
-                    writer.writerow(['number', 'question_text', 'question_image', 'choice_type', 'true_choice', 'choice1', 'choice2', 
+                    writer.writerow(['number', 'question_text', 'question_image', 'choice_type', 'answer', 'choice1', 'choice2', 
                                     'choice3', 'choice4'])
                 self.close()
                 self.closed.emit()
         else:
             self.label_2.setText('Invalid Quiz name.')
-        
-    def cancel_button(self):
-        csv_files = [file for file in self.all_files if file.endswith('.csv')]
-        
-        if not csv_files:
-            self.label_2.setText('There is no Quiz to edit, Create one to edit.')
-        elif csv_files:
-            self.close()
 
 
 class EscapeFilter(QObject):
