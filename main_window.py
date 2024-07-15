@@ -101,16 +101,18 @@ class QuizWindow(QWidget):
         super().__init__()
         loadUi("ui/quiz.ui", self)
         
-        self.quiz_name = ''
+        self.quiz_name = str()
+        self.question_list = list()
         self.question = 0
         self.execution_time = time.time()
         
         self.thread = Quiz.Quiz()
         self.quiz_name_from_menu.connect(self.quiz_data)
-        self.quiz_name_from_menu.connect(self.thread.quiz_name.emit)
+        self.quiz_name_from_menu.connect(self.thread.quiz_name_signal.emit)
         self.thread.frame_signal.connect(self.computer_vision)
         self.thread.question_signal.connect(self.handle_question)
         self.thread.reset_signal.connect(self.handle_question)
+        self.thread.finish_signal.connect(self.finish_quiz)
         self.thread.start()
         
         self.pushButton.clicked.connect(self.undo_question)
@@ -125,7 +127,13 @@ class QuizWindow(QWidget):
         
     def quiz_data(self, quiz_name):
         self.quiz_name = quiz_name
-        self.undo_question()
+        with open(f'quiz/{self.quiz_name}.csv', 'r', newline='', encoding='utf-8') as file:
+            reader = csv.reader(file)
+            self.question_list = list(reader)
+        
+        self.progressBar.setMaximum(len(self.question_list) - 1)
+        self.progressBar.setMinimum(0)
+        self.reset_question()
     
     @pyqtSlot(np.ndarray)
     def computer_vision(self, frame):
@@ -140,27 +148,25 @@ class QuizWindow(QWidget):
         
     def handle_question(self, question_index):
         self.question = question_index
-        with open(f'quiz/{self.quiz_name}.csv', 'r', newline='', encoding='utf-8') as file:
-            reader = csv.reader(file)
-            rows = list(reader)
-            question_data = rows[self.question + 1]
+        self.progressBar.setValue(self.question)
+        question_data = self.question_list[self.question + 1]
+        self.label_10.setText(question_data[1])
+        
+        if question_data[2]:
+            self.set_image(self.label_1, question_data[2])
+        else:
+            self.label_1.clear()
             
-            self.label_10.setText(question_data[1])
-            if question_data[2]:
-                self.set_image(self.label_1, question_data[2])
-            else:
-                self.label_1.clear()
-                
-            if question_data[3] == 'text':
-                self.label_2.setText(question_data[5])
-                self.label_3.setText(question_data[6])
-                self.label_4.setText(question_data[7])
-                self.label_5.setText(question_data[8])
-            elif question_data[3] == 'image':
-                self.set_image(self.label_2, question_data[5])
-                self.set_image(self.label_3, question_data[6])
-                self.set_image(self.label_4, question_data[7])
-                self.set_image(self.label_5, question_data[8])
+        if question_data[3] == 'text':
+            self.label_2.setText(question_data[5])
+            self.label_3.setText(question_data[6])
+            self.label_4.setText(question_data[7])
+            self.label_5.setText(question_data[8])
+        elif self.question_data[3] == 'image':
+            self.set_image(self.label_2, question_data[5])
+            self.set_image(self.label_3, question_data[6])
+            self.set_image(self.label_4, question_data[7])
+            self.set_image(self.label_5, question_data[8])
         
     def undo_question(self):
         if self.question >= 1:
@@ -170,6 +176,12 @@ class QuizWindow(QWidget):
     def reset_question(self):
         self.question = 0
         self.thread.command_signal.emit("reset")
+        
+    def finish_quiz(self, quiz_name, score):
+        quiz_finish = QuizFinish()
+        widget.addWidget(quiz_finish)
+        widget.setCurrentIndex(widget.currentIndex() + 1)
+        quiz_finish.score_signal.emit(quiz_name, score)
         
     def set_image(self, label, image_path):
         if image_path.lower().endswith(('.png', '.jpg', 'jpeg')):
@@ -181,6 +193,36 @@ class QuizWindow(QWidget):
             label.setAlignment(Qt.AlignCenter)
         else:
             label.clear()
+            
+
+class QuizFinish(QWidget):
+    score_signal = pyqtSignal(str, float)
+    
+    def __init__(self):
+        super().__init__()
+        loadUi("ui/quiz_finish.ui", self)
+        
+        self.quiz_name = ''
+        self.score_signal.connect(self.show_result)
+        
+        self.pushButton.clicked.connect(self.restart_quiz)
+        self.pushButton_2.clicked.connect(self.to_quiz_menu)
+        
+    def show_result(self, quiz_name, score):
+        self.quiz_name = quiz_name
+        self.label_2.setText(f"Congratulations! You have finished Quiz: \"{self.quiz_name}\"")
+        self.label.setText(f"Score: {score}")
+        
+    def to_quiz_menu(self):
+        quiz_menu = QuizMenu()
+        widget.addWidget(quiz_menu)
+        widget.setCurrentIndex(widget.currentIndex() + 1)
+        
+    def restart_quiz(self):
+        quiz_window = QuizWindow()
+        widget.addWidget(quiz_window)
+        widget.setCurrentIndex(widget.currentIndex() + 1)
+        quiz_window.quiz_name_from_menu.emit(self.quiz_name)
         
 
 class QuizEdit(QWidget):
@@ -469,8 +511,8 @@ if __name__ == "__main__":
     window = MainWindow()
     widget = QtWidgets.QStackedWidget()
     widget.addWidget(window)
-    widget.setGeometry(600, 200, 640, 480)
-    # widget.showFullScreen()
+    # widget.setGeometry(600, 200, 640, 480)
+    widget.showFullScreen()
     widget.show()
     
     escape_filter = EscapeFilter()
