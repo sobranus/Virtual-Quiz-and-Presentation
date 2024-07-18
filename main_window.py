@@ -15,6 +15,7 @@ import Mouse
 import Quiz
 
 
+
 def fit_pixmap(pixmap, label_height, label_width):
     width = pixmap.width()
     height = pixmap.height()
@@ -32,6 +33,7 @@ def fit_pixmap(pixmap, label_height, label_width):
         img_resize = pixmap.scaled(label_width, h_cal)
         
     return img_resize
+
 
 
 class MainWindow(QWidget):
@@ -53,8 +55,9 @@ class MainWindow(QWidget):
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
             self.close()
-        
-        
+
+
+
 class QuizMenu(QWidget):
     def __init__(self):
         super().__init__()
@@ -92,7 +95,8 @@ class QuizMenu(QWidget):
         for file in csv_files:
             if file not in existing_files:
                 self.comboBox.addItem(file)
-        
+
+
 
 class QuizWindow(QWidget):
     quiz_name_from_menu = pyqtSignal(str)
@@ -110,6 +114,7 @@ class QuizWindow(QWidget):
         self.quiz_name_from_menu.connect(self.quiz_data)
         self.quiz_name_from_menu.connect(self.thread.quiz_name_signal.emit)
         self.thread.frame_signal.connect(self.computer_vision)
+        self.thread.indicator_signal.connect(self.handle_indicator)
         self.thread.question_signal.connect(self.handle_question)
         self.thread.reset_signal.connect(self.handle_question)
         self.thread.finish_signal.connect(self.finish_quiz)
@@ -146,27 +151,36 @@ class QuizWindow(QWidget):
         q_img = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
         self.label.setPixmap(QPixmap.fromImage(q_img))
         
+    def handle_indicator(self, indicator_color):
+        self.label_11.setStyleSheet(f"""
+                                    color: {indicator_color};
+                                    background-color: {indicator_color};
+                                    border-radius: 12px;
+                                    min-width: 20px;
+                                    min-height: 20px;
+                                    """)
+        
     def handle_question(self, question_index):
         self.question = question_index
         self.progressBar.setValue(self.question)
         question_data = self.question_list[self.question + 1]
-        self.label_10.setText(question_data[1])
+        self.label_10.setText(question_data[0])
         
-        if question_data[2]:
-            self.set_image(self.label_1, question_data[2])
+        if question_data[1]:
+            self.set_image(self.label_1, question_data[1])
         else:
             self.label_1.clear()
             
-        if question_data[3] == 'text':
-            self.label_2.setText(question_data[5])
-            self.label_3.setText(question_data[6])
-            self.label_4.setText(question_data[7])
-            self.label_5.setText(question_data[8])
-        elif self.question_data[3] == 'image':
-            self.set_image(self.label_2, question_data[5])
-            self.set_image(self.label_3, question_data[6])
-            self.set_image(self.label_4, question_data[7])
-            self.set_image(self.label_5, question_data[8])
+        if question_data[2] == 'text':
+            self.label_2.setText(question_data[4])
+            self.label_3.setText(question_data[5])
+            self.label_4.setText(question_data[6])
+            self.label_5.setText(question_data[7])
+        elif question_data[2] == 'image':
+            self.set_image(self.label_2, question_data[4])
+            self.set_image(self.label_3, question_data[5])
+            self.set_image(self.label_4, question_data[6])
+            self.set_image(self.label_5, question_data[7])
         
     def undo_question(self):
         if self.question >= 1:
@@ -193,7 +207,8 @@ class QuizWindow(QWidget):
             label.setAlignment(Qt.AlignCenter)
         else:
             label.clear()
-            
+
+
 
 class QuizFinish(QWidget):
     score_signal = pyqtSignal(str, float)
@@ -223,7 +238,8 @@ class QuizFinish(QWidget):
         widget.addWidget(quiz_window)
         widget.setCurrentIndex(widget.currentIndex() + 1)
         quiz_window.quiz_name_from_menu.emit(self.quiz_name)
-        
+
+
 
 class QuizEdit(QWidget):
     quiz_index_from_menu = pyqtSignal(int)
@@ -233,6 +249,7 @@ class QuizEdit(QWidget):
         super().__init__()
         loadUi("ui/quiz_edit.ui", self)
         
+        self.quiz_name = str()
         self.disable_choice_type()
         self.load_quiz_list()
         if not self.comboBox.currentText():
@@ -241,17 +258,19 @@ class QuizEdit(QWidget):
             self.load_question()
         self.quiz_index_from_menu.connect(self.comboBox.setCurrentIndex)
         
+        self.pushButton_2.clicked.connect(self.delete_question)
         self.pushButton_3.clicked.connect(self.to_quiz_menu)
-        self.comboBox.currentIndexChanged.connect(self.select_quiz_handle)
-        self.pushButton.clicked.connect(self.save_inputs)
         self.pushButton_4.clicked.connect(self.new_quiz_window)
         self.pushButton_5.clicked.connect(self.question_number_handle)
         self.pushButton_6.clicked.connect(self.question_number_handle)
+        self.pushButton_7.clicked.connect(self.delete_quiz)
         self.upload_0.clicked.connect(self.image_upload)
         self.upload_1.clicked.connect(self.image_upload)
         self.upload_2.clicked.connect(self.image_upload)
         self.upload_3.clicked.connect(self.image_upload)
         self.upload_4.clicked.connect(self.image_upload)
+        self.comboBox.currentIndexChanged.connect(self.select_quiz_handle)
+        self.pushButton.clicked.connect(self.save_inputs)
         self.radioButton.toggled.connect(self.disable_choice_type)
         self.radioButton_2.toggled.connect(self.disable_choice_type)
         
@@ -269,7 +288,8 @@ class QuizEdit(QWidget):
         
     def select_quiz_handle(self):
         self.label_11.setText('1')
-        self.load_question()
+        if self.comboBox.count() > 0:
+            self.load_question()
         
     def question_number_handle(self):
         button = self.sender().objectName()
@@ -327,20 +347,20 @@ class QuizEdit(QWidget):
             label.clear()
     
     def load_question(self):
-        quiz_name = self.comboBox.currentText()
+        self.quiz_name = self.comboBox.currentText()
         question_number = int(self.label_11.text())
-        question_data = [f'{question_number}', '', '', 'text', '1', '', '', '', '']
+        question_data = ['', '', 'text', '1', '', '', '', '']
             
-        with open(f'quiz/{quiz_name}.csv', 'r', newline='', encoding='utf-8') as file:
+        with open(f'quiz/{self.quiz_name}.csv', 'r', newline='', encoding='utf-8') as file:
             reader = csv.reader(file)
             for i, row in enumerate(reader):
                 if i == question_number:
                     question_data = row
                     
-            self.questionText.setPlainText(question_data[1])
-            self.comboBox_2.setCurrentIndex(int(question_data[4]) - 1)
-            self.label_6.setText(question_data[2])
-            self.load_image(question_data[2], self.label)
+            self.questionText.setPlainText(question_data[0])
+            self.comboBox_2.setCurrentIndex(int(question_data[3]) - 1)
+            self.label_6.setText(question_data[1])
+            self.load_image(question_data[1], self.label)
             
             self.choice_1.clear()
             self.choice_2.clear()
@@ -351,26 +371,25 @@ class QuizEdit(QWidget):
             self.label_9.clear()
             self.label_10.clear()
             
-            if question_data[3] == 'text':
+            if question_data[2] == 'text':
                 self.radioButton.setChecked(True)
-                self.choice_1.setPlainText(question_data[5])
-                self.choice_2.setPlainText(question_data[6])
-                self.choice_3.setPlainText(question_data[7])
-                self.choice_4.setPlainText(question_data[8])
-            elif question_data[3] == 'image':
+                self.choice_1.setPlainText(question_data[4])
+                self.choice_2.setPlainText(question_data[5])
+                self.choice_3.setPlainText(question_data[6])
+                self.choice_4.setPlainText(question_data[7])
+            elif question_data[2] == 'image':
                 self.radioButton_2.setChecked(True)
-                self.label_7.setText(question_data[5])
-                self.label_8.setText(question_data[6])
-                self.label_9.setText(question_data[7])
-                self.label_10.setText(question_data[8])
+                self.label_7.setText(question_data[4])
+                self.label_8.setText(question_data[5])
+                self.label_9.setText(question_data[6])
+                self.label_10.setText(question_data[7])
             
-            self.load_image(question_data[5], self.label_2)
-            self.load_image(question_data[6], self.label_3)
-            self.load_image(question_data[7], self.label_4)
-            self.load_image(question_data[8], self.label_5)
+            self.load_image(question_data[4], self.label_2)
+            self.load_image(question_data[5], self.label_3)
+            self.load_image(question_data[6], self.label_4)
+            self.load_image(question_data[7], self.label_5)
         
     def save_inputs(self):
-        quiz_name = self.comboBox.currentText()
         question_number = int(self.label_11.text())
         question_text = self.questionText.toPlainText()
         question_image = self.label_6.text()
@@ -397,12 +416,11 @@ class QuizEdit(QWidget):
                 self.label_10.text()
             ])
         
-        with open(f'quiz/{quiz_name}.csv', 'r', newline='', encoding='utf-8') as file:
+        with open(f'quiz/{self.quiz_name}.csv', 'r', newline='', encoding='utf-8') as file:
             reader = csv.reader(file)
             rows = list(reader)
             
             row = [
-                question_number,
                 question_text,
                 question_image,
                 choice_type,
@@ -415,9 +433,38 @@ class QuizEdit(QWidget):
             else:
                 rows.append(row)
             
-            with open(f'quiz/{quiz_name}.csv', mode='w', newline='', encoding='utf-8') as file:
+            with open(f'quiz/{self.quiz_name}.csv', mode='w', newline='', encoding='utf-8') as file:
                 writer = csv.writer(file)
                 writer.writerows(rows)
+                
+    def delete_quiz(self):
+        quiz_path = f'quiz/{self.quiz_name}.csv'
+        quiz_index = self.comboBox.currentIndex()
+        if os.path.exists(quiz_path):
+            os.remove(quiz_path)
+            self.comboBox.removeItem(quiz_index)
+            if quiz_index > 0:
+                self.comboBox.setCurrentIndex(quiz_index - 1)
+            else:
+                self.new_quiz_window()
+            
+            
+    def delete_question(self):
+        question_number = int(self.label_11.text())
+        rows = []
+        with open(f'quiz/{self.quiz_name}.csv', mode='r', newline='', encoding='utf-8') as file:
+            reader = csv.reader(file)
+            for index, row in enumerate(reader):
+                if index != question_number:
+                    rows.append(row)
+
+        with open(f'quiz/{self.quiz_name}.csv', mode='w', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file)
+            writer.writerows(rows)
+            
+        if question_number >= 2:
+            self.label_11.setText(str(question_number - 1))
+        self.load_question()
         
     def image_upload(self):
         button = self.sender().objectName()
@@ -450,8 +497,9 @@ class QuizEdit(QWidget):
             elif button[-1] == '4':
                 self.label_10.setText(normalized_path)
                 self.load_image(normalized_path, self.label_5)
-            
-            
+
+
+
 class NewQuiz(QWidget):
     closed = pyqtSignal()
     
@@ -490,12 +538,13 @@ class NewQuiz(QWidget):
             else:
                 with open(f'quiz/{quiz_name}.csv', 'w', newline='', encoding='utf-8') as file:
                     writer = csv.writer(file)
-                    writer.writerow(['number', 'question_text', 'question_image', 'choice_type', 'answer', 'choice1', 'choice2', 
+                    writer.writerow(['question_text', 'question_image', 'choice_type', 'answer', 'choice1', 'choice2', 
                                     'choice3', 'choice4'])
                 self.close()
                 self.closed.emit()
         else:
             self.label_2.setText('Invalid Quiz name.')
+
 
 
 class EscapeFilter(QObject):
@@ -504,8 +553,9 @@ class EscapeFilter(QObject):
             QApplication.quit()
             return True
         return super().eventFilter(obj, event)
-    
-        
+
+
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = MainWindow()
