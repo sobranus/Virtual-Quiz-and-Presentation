@@ -7,8 +7,6 @@ from cvzone.HandTrackingModule import HandDetector
 from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot
 
 
-prev_time = 0
-
 class Data():
     def __init__(self, data):
         self.question_text = data["question_text"]
@@ -40,6 +38,7 @@ class Data():
 class Quiz(QThread):
     quiz_name_signal = pyqtSignal(str)
     frame_signal = pyqtSignal(np.ndarray)
+    indicator_signal = pyqtSignal(str)
     question_signal = pyqtSignal(int)
     reset_signal = pyqtSignal(int)
     command_signal = pyqtSignal(str)
@@ -53,7 +52,7 @@ class Quiz(QThread):
         self.video.set(cv2.CAP_PROP_FRAME_WIDTH, 1200)
         self.window_name = 'window_name'
         
-        self.quiz_name = ''
+        self.quiz_name = str()
         self.ardlist = []
         self.running = True
         self.qNo = 0
@@ -61,7 +60,11 @@ class Quiz(QThread):
         self.qTotal = 0
         
         self.last_execution_time = time.time()
+        self.detection_time = time.time()
         self.cooldown_period = 3
+        self.on_cooldown = True
+        self.detected_answer = None
+        self.double_detection = False
         
         self.quiz_name_signal.connect(self.import_quiz_data)
         self.command_signal.connect(self.handle_command)
@@ -78,29 +81,50 @@ class Quiz(QThread):
 
     def run(self):
         while self.running:
+            current_time = time.time()
             ret, frame = self.video.read()
             frame = cv2.flip(frame, 1)
             hands, img = self.detector.findHands(frame)
-            current_time = time.time()
-
-            if self.qNo < self.qTotal:
+            
+            if self.on_cooldown:
+                if current_time - self.last_execution_time >= self.cooldown_period:
+                    self.on_cooldown = False
+                    self.indicator_signal.emit('rgba(0, 0, 0, 0)')
+            
+            elif self.qNo < self.qTotal:
                 ard = self.ardlist[self.qNo]
 
                 if hands and len(hands) > 0:
                     # lmList = hands[0]['lmList']
                     fingers = self.detector.fingersUp(hands[0])
                     ard.update(fingers)
+                    answer = ard.chosen_answer
                     
-                    if current_time - self.last_execution_time >= self.cooldown_period:
-                        if ard.chosen_answer is not None:
-                            self.qNo += 1
-                            if self.qNo != self.qTotal:
-                                self.question_signal.emit(self.qNo)
-                                
-                            self.last_execution_time = time.time()
+                    if answer:
+                        if not self.double_detection:
+                            self.detected_answer = answer
+                            self.detection_time = time.time()
+                            self.double_detection = True
+                            self.indicator_signal.emit('rgb(0, 255, 0)')
+                        
+                        elif current_time > self.detection_time + 1:
+                            self.double_detection = False
+                            if answer == self.detected_answer:
+                                self.qNo += 1
+                                if self.qNo != self.qTotal:
+                                    self.question_signal.emit(self.qNo)
+                                self.indicator_signal.emit('red')
+                                self.on_cooldown = True
+                                self.last_execution_time = time.time()
+                    else:
+                        self.indicator_signal.emit('rgba(0, 0, 0, 0)')
+                        self.detected_answer = None
+                else:
+                    self.indicator_signal.emit('rgba(0, 0, 0, 0)')
+                    self.detected_answer = None
 
             elif self.qNo == self.qTotal:
-                self.score = sum(1 for ard in self.ardlist if ard.answer == ard.chosen_answer)
+                self.score = sum(1 for ard in self.ardlist if ard.answer == answer)
                 self.score = round((self.score / self.qTotal) * 100, 2)
                 self.finish_signal.emit(self.quiz_name, self.score)
                 self.stop_quiz()
