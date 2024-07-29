@@ -6,14 +6,14 @@ import time
 import numpy as np
 import csv
 import cv2
+from pynput.keyboard import Key, Controller as KeyboardController
 from PyQt5 import QtWidgets
 from PyQt5.QtWidgets import QApplication, QWidget, QFileDialog
-from PyQt5.QtGui import QPixmap, QImage
+from PyQt5.QtGui import QPixmap, QImage, QIcon
 from PyQt5.uic import loadUi
-from PyQt5.QtCore import Qt, QObject, QTimer, pyqtSignal, pyqtSlot
-import Mouse
-import Quiz
-
+from PyQt5.QtCore import Qt, QObject, pyqtSignal, pyqtSlot
+import presentation
+import quiz
 
 
 def fit_pixmap(pixmap, label_height, label_width):
@@ -40,29 +40,85 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         loadUi("ui/main_window.ui", self)
+        
+        self.available_camera = []
+        for i in range(3, -1, -1):
+            cap = cv2.VideoCapture(i)
+            if cap.isOpened():
+                self.available_camera = i
+                cap.release()
+                break
+        
+        self.original_geometry = self.geometry()
+        self.presentation = presentation.Presentation(camera_source=self.available_camera)
+        self.key_control = KeyboardController()
+        self.presentation.frame_signal.connect(self.computer_vision)
+        self.presentation.finished.connect(self.show_menu)
+        self.label.hide()
+        self.pushButton_3.hide()
+        
         self.pushButton.clicked.connect(self.to_presentation)
         self.pushButton_2.clicked.connect(self.to_quiz_menu)
+        self.pushButton_3.clicked.connect(self.stop_presentation)
+        self.pushButton_4.clicked.connect(self.close_app)
         
     def to_quiz_menu(self):
-        quiz_menu = QuizMenu()
+        quiz_menu = QuizMenu(self.available_camera)
         widget.addWidget(quiz_menu)
         widget.setCurrentIndex(widget.currentIndex() + 1)
         
     def to_presentation(self):
-        self.virtual_mouse = Mouse.Mouse()
-        self.virtual_mouse.run()
+        self.pushButton.hide()
+        self.pushButton_2.hide()
+        self.pushButton_4.hide()
+        self.label_2.hide()
+        widget.setWindowFlag(Qt.WindowCloseButtonHint, False)
+        widget.showNormal()
+        widget.setWindowTitle('Presentation')
+        widget.setGeometry(600, 200, 300, 200)
+        self.pushButton_3.show()
+        self.label.show()
+        self.presentation.run()
+        
+    @pyqtSlot(np.ndarray)
+    def computer_vision(self, frame):
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb_frame.shape
+        bytes_per_line = ch * w
+        q_img = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        self.label.setPixmap(QPixmap.fromImage(q_img))
+        
+    def stop_presentation(self):
+        self.presentation.stop_presentation.emit()
+    
+    def show_menu(self):
+        self.pushButton_3.hide()
+        self.label.hide()
+        self.label_2.show()
+        self.pushButton.show()
+        self.pushButton_2.show()
+        self.pushButton_4.show()
+        widget.showFullScreen()
+        self.presentation = presentation.Presentation(camera_source=self.available_camera)
+        self.presentation.frame_signal.connect(self.computer_vision)
+        self.presentation.finished.connect(self.show_menu)
+        
+    def close_app(self):
+        self.key_control.press('q')
+        self.key_control.release('q')
     
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Escape:
+        if event.key() == Qt.Key_Q:
             self.close()
 
 
 
 class QuizMenu(QWidget):
-    def __init__(self):
+    def __init__(self, available_camera):
         super().__init__()
         loadUi("ui/quiz_menu.ui", self)
         self.load_quiz_list()
+        self.available_camera = available_camera
         
         self.pushButton.clicked.connect(self.to_main_window)
         self.pushButton_2.clicked.connect(self.to_quiz_edit)
@@ -74,13 +130,13 @@ class QuizMenu(QWidget):
         widget.setCurrentIndex(widget.currentIndex() + 1)
         
     def to_quiz_edit(self):
-        quiz_edit = QuizEdit()
+        quiz_edit = QuizEdit(self.available_camera)
         widget.addWidget(quiz_edit)
         widget.setCurrentIndex(widget.currentIndex() + 1)
         quiz_edit.quiz_index_from_menu.emit(self.comboBox.currentIndex())
         
     def to_quiz_window(self):
-        quiz_window = QuizWindow()
+        quiz_window = QuizWindow(self.available_camera)
         widget.addWidget(quiz_window)
         widget.setCurrentIndex(widget.currentIndex() + 1)
         quiz_window.quiz_name_from_menu.emit(self.comboBox.currentText())
@@ -101,16 +157,17 @@ class QuizMenu(QWidget):
 class QuizWindow(QWidget):
     quiz_name_from_menu = pyqtSignal(str)
     
-    def __init__(self):
+    def __init__(self, available_camera):
         super().__init__()
         loadUi("ui/quiz.ui", self)
         
+        self.available_camera = available_camera
         self.quiz_name = str()
         self.question_list = list()
         self.question = 0
         self.execution_time = time.time()
         
-        self.thread = Quiz.Quiz()
+        self.thread = quiz.Quiz(camera_source=self.available_camera)
         self.quiz_name_from_menu.connect(self.quiz_data)
         self.quiz_name_from_menu.connect(self.thread.quiz_name_signal.emit)
         self.thread.frame_signal.connect(self.computer_vision)
@@ -125,7 +182,7 @@ class QuizWindow(QWidget):
         self.pushButton_3.clicked.connect(self.to_quiz_menu)
         
     def to_quiz_menu(self):
-        quiz_menu = QuizMenu()
+        quiz_menu = QuizMenu(self.available_camera)
         widget.addWidget(quiz_menu)
         widget.setCurrentIndex(widget.currentIndex() + 1)
         self.thread.stop_signal.emit()
@@ -192,7 +249,7 @@ class QuizWindow(QWidget):
         self.thread.command_signal.emit("reset")
         
     def finish_quiz(self, quiz_name, score):
-        quiz_finish = QuizFinish()
+        quiz_finish = QuizFinish(self.available_camera)
         widget.addWidget(quiz_finish)
         widget.setCurrentIndex(widget.currentIndex() + 1)
         quiz_finish.score_signal.emit(quiz_name, score)
@@ -213,10 +270,11 @@ class QuizWindow(QWidget):
 class QuizFinish(QWidget):
     score_signal = pyqtSignal(str, float)
     
-    def __init__(self):
+    def __init__(self, available_camera):
         super().__init__()
         loadUi("ui/quiz_finish.ui", self)
         
+        self.available_camera = available_camera
         self.quiz_name = ''
         self.score_signal.connect(self.show_result)
         
@@ -229,12 +287,12 @@ class QuizFinish(QWidget):
         self.label.setText(f"Score: {score}")
         
     def to_quiz_menu(self):
-        quiz_menu = QuizMenu()
+        quiz_menu = QuizMenu(self.available_camera)
         widget.addWidget(quiz_menu)
         widget.setCurrentIndex(widget.currentIndex() + 1)
         
     def restart_quiz(self):
-        quiz_window = QuizWindow()
+        quiz_window = QuizWindow(self.available_camera)
         widget.addWidget(quiz_window)
         widget.setCurrentIndex(widget.currentIndex() + 1)
         quiz_window.quiz_name_from_menu.emit(self.quiz_name)
@@ -245,10 +303,11 @@ class QuizEdit(QWidget):
     quiz_index_from_menu = pyqtSignal(int)
     closed = pyqtSignal()
     
-    def __init__(self):
+    def __init__(self, available_camera):
         super().__init__()
         loadUi("ui/quiz_edit.ui", self)
         
+        self.available_camera = available_camera
         self.quiz_name = str()
         self.disable_choice_type()
         self.load_quiz_list()
@@ -275,12 +334,12 @@ class QuizEdit(QWidget):
         self.radioButton_2.toggled.connect(self.disable_choice_type)
         
     def to_quiz_menu(self):
-        quiz_menu = QuizMenu()
+        quiz_menu = QuizMenu(self.available_camera)
         widget.addWidget(quiz_menu)
         widget.setCurrentIndex(widget.currentIndex() + 1)
         
     def new_quiz_window(self):
-        self.new_quiz = NewQuiz()
+        self.new_quiz = NewQuiz(self.available_camera)
         self.new_quiz.closed.connect(self.load_quiz_list)
         self.new_quiz.show()
         self.new_quiz.raise_()
@@ -448,7 +507,6 @@ class QuizEdit(QWidget):
             else:
                 self.new_quiz_window()
             
-            
     def delete_question(self):
         question_number = int(self.label_11.text())
         rows = []
@@ -503,9 +561,11 @@ class QuizEdit(QWidget):
 class NewQuiz(QWidget):
     closed = pyqtSignal()
     
-    def __init__(self):
+    def __init__(self, available_camera):
         super().__init__()
         loadUi("ui/new_quiz.ui", self)
+        
+        self.available_camera = available_camera
         self.setWindowFlags(Qt.Window | Qt.CustomizeWindowHint | Qt.WindowTitleHint)
         self.setWindowModality(Qt.ApplicationModal)
         self.all_files = os.listdir('quiz')
@@ -515,7 +575,7 @@ class NewQuiz(QWidget):
         self.pushButton_3.clicked.connect(self.to_quiz_menu)
         
     def to_quiz_menu(self):
-        quiz_menu = QuizMenu()
+        quiz_menu = QuizMenu(self.available_camera)
         widget.addWidget(quiz_menu)
         widget.setCurrentIndex(widget.currentIndex() + 1)
         self.close()
@@ -549,7 +609,7 @@ class NewQuiz(QWidget):
 
 class EscapeFilter(QObject):
     def eventFilter(self, obj, event):
-        if event.type() == event.KeyPress and event.key() == Qt.Key_Escape:
+        if event.type() == event.KeyPress and event.key() == Qt.Key_Q:
             QApplication.quit()
             return True
         return super().eventFilter(obj, event)
@@ -558,9 +618,11 @@ class EscapeFilter(QObject):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = MainWindow()
     widget = QtWidgets.QStackedWidget()
+    window = MainWindow()
     widget.addWidget(window)
+    widget.setWindowTitle('Window')
+    widget.setWindowIcon(QIcon('logo_upi.ico'))
     # widget.setGeometry(600, 200, 640, 480)
     widget.showFullScreen()
     widget.show()
