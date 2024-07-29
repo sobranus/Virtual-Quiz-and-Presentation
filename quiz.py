@@ -2,8 +2,7 @@ import cv2
 import csv
 import time
 import numpy as np
-import cvzone
-from cvzone.HandTrackingModule import HandDetector
+from HandTrackingModule import HandDetector
 from PyQt5.QtCore import QThread, pyqtSignal, pyqtSlot
 
 
@@ -29,7 +28,7 @@ class Data():
             self.chosen_answer = 3
         elif fingers == [0, 1, 1, 1, 1]:  # Jika 4 jari diangkat
             self.chosen_answer = 4
-        elif fingers == [1, 1, 1, 1, 1]:  # Jika 5 jari diangkat
+        else:  # Jika 5 jari diangkat
             self.chosen_answer = None
              
 # cv2.namedWindow("img")
@@ -45,10 +44,10 @@ class Quiz(QThread):
     finish_signal = pyqtSignal(str, float)
     stop_signal = pyqtSignal()
     
-    def __init__(self):
+    def __init__(self, camera_source=0):
         super().__init__()
         self.detector = HandDetector(detectionCon=0.8, maxHands=2)
-        self.video = cv2.VideoCapture(1)
+        self.video = cv2.VideoCapture(camera_source)
         self.video.set(cv2.CAP_PROP_FRAME_WIDTH, 1200)
         self.window_name = 'window_name'
         
@@ -96,7 +95,7 @@ class Quiz(QThread):
 
                 if hands and len(hands) > 0:
                     # lmList = hands[0]['lmList']
-                    fingers = self.detector.fingersUp(hands[0])
+                    fingers = self.detector.tipsUp(hands[0])
                     ard.update(fingers)
                     answer = ard.chosen_answer
                     
@@ -123,8 +122,8 @@ class Quiz(QThread):
                     self.indicator_signal.emit('rgba(0, 0, 0, 0)')
                     self.detected_answer = None
 
-            elif self.qNo == self.qTotal:
-                self.score = sum(1 for ard in self.ardlist if ard.answer == answer)
+            if self.qNo == self.qTotal:
+                self.score = sum(1 for ard in self.ardlist if ard.answer == ard.chosen_answer)
                 self.score = round((self.score / self.qTotal) * 100, 2)
                 self.finish_signal.emit(self.quiz_name, self.score)
                 self.stop_quiz()
